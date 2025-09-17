@@ -2,7 +2,7 @@
 [![Streamlit 应用](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://project-destiny.streamlit.app)  
 [![构建状态](https://img.shields.io/github/workflow/status/project-destiny/ci/main?label=构建)](https://github.com/project-destiny/actions)  
 [![代码覆盖率](https://img.shields.io/codecov/c/github/project-destiny?label=覆盖率)](https://codecov.io/gh/project-destiny)  
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python)](https://www.python.org)  
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://www.python.org)  
 [![许可证](https://img.shields.io/badge/许可证-MIT-blue)](LICENSE)  
 [![Stars](https://img.shields.io/github/stars/project-destiny?style=social)](https://github.com/project-destiny)
 
