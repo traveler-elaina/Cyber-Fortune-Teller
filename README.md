@@ -66,7 +66,7 @@ git clone https://github.com/project-destiny/project-destiny.git
 pip install -r requirements.txt
 streamlit run app.py
 ```
-依赖：```Python 3.8+```、```streamlit```、```numpy```。详见 ```requirements.txt```。
+依赖：```Python 3.10```、```streamlit```、```numpy```。详见 ```requirements.txt```。
 
 ## 🤲 核心价值观与伦理框架
 
