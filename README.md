@@ -1,5 +1,6 @@
 # 项目天命：人本主义AI叙事引擎
-[![Streamlit 应用](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://project-destiny.streamlit.app)  [![构建状态](https://img.shields.io/github/workflow/status/project-destiny/ci/main?label=构建&color=brightgreen)](https://github.com/project-destiny/actions)  [![代码覆盖率](https://img.shields.io/codecov/c/github/project-destiny?label=覆盖率&color=brightgreen)](https://codecov.io/gh/project-destiny)  
+[![构建状态](https://img.shields.io/github/workflow/status/project-destiny/ci/main?label=构建&color=brightgreen)](https://github.com/project-destiny/actions)  
+[![代码覆盖率](https://img.shields.io/codecov/c/github/project-destiny?label=覆盖率&color=brightgreen)](https://codecov.io/gh/project-destiny)  
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Streamlit](https://img.shields.io/badge/streamlit-%E2%9C%93-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
