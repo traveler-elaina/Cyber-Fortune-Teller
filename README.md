@@ -2,7 +2,8 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Streamlit](https://img.shields.io/badge/streamlit-%E2%9C%93-brightgreen)
-![License](https://img.shields.io/badge/license-MIT-green)[![构建状态](https://img.shields.io/github/workflow/status/project-destiny/ci/main?label=构建&color=brightgreen)](https://github.com/project-destiny/actions)  
+![License](https://img.shields.io/badge/license-MIT-green)
+[![构建状态](https://img.shields.io/github/workflow/status/project-destiny/ci/main?label=构建&color=brightgreen)](https://github.com/project-destiny/actions)  
 [![代码覆盖率](https://img.shields.io/codecov/c/github/project-destiny?label=覆盖率&color=brightgreen)](https://codecov.io/gh/project-destiny)  
 
 **项目天命：** 由人本主义哲学家与AI共同打造，超越MBTI的创造性自我叙事引擎，点燃年轻人的内心探索之旅。
