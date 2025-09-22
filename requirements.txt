@@ -5,6 +5,6 @@ matplotlib>=3.7.0,<3.10.0
 
 seaborn>=0.12.0,<0.14.0
 
-openai
+openai>=1.0.0
+supabase>=2.0.0  # supabase-py 官方库
 
-sqlite3
