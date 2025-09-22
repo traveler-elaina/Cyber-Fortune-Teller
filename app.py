@@ -21,26 +21,36 @@ st.markdown(
     }
     .stSidebar {
         width: 250px !important;
+        background-color: #f8f9fa;
     }
     .conversation-button {
         display: block;
         width: 100%;
         padding: 10px;
-        margin: 5px 0;
-        border-radius: 5px;
-        background-color: #f0f0f0;
-        border: none;
+        margin: 2px 0;
+        border-radius: 8px;
+        background-color: #ffffff;
+        border: 1px solid #ddd;
         text-align: left;
         cursor: pointer;
-        font-size: 16px;
-        transition: background-color 0.2s;
+        font-size: 14px;
+        transition: all 0.2s;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .conversation-button:hover {
-        background-color: #e0e0e0;
+        background-color: #f0f0f0;
+        border-color: #ccc;
     }
     .conversation-button.active {
         background-color: #007bff;
         color: white;
+        border-color: #0056b3;
+    }
+    .conversation-button span {
+        display: block;
+        font-size: 12px;
+        color: #666;
     }
     [data-testid="stTextInput"], [data-testid="stSelectbox"] {
         cursor: pointer;
@@ -101,6 +111,15 @@ def get_conversation_ids():
         st.error(f"获取对话列表失败：{str(e)}")
         return ["对话 1"]
 
+# 获取最新消息预览
+@st.cache_data
+def get_preview(conv_id):
+    try:
+        response = supabase.table("conversations").select("content").eq("conv_id", conv_id).order("timestamp", desc=True).limit(1).execute()
+        return response.data[0]["content"][:20] + "..." if response.data else "无消息"
+    except Exception:
+        return "无消息"
+
 # 初始化会话状态
 if "conversations" not in st.session_state:
     st.session_state.conversations = {
@@ -120,44 +139,43 @@ with st.sidebar:
     for conv_name in conversation_names:
         is_active = conv_name == st.session_state.current_conversation
         button_style = "conversation-button active" if is_active else "conversation-button"
+        preview = get_preview(conv_name)
         st.markdown(
-            f'<button class="{button_style}" onclick="this.blur()">{conv_name}</button>',
+            f'<button class="{button_style}" onclick="this.blur()">{conv_name}<br><span>{preview}</span></button>',
             unsafe_allow_html=True
         )
         if st.button(" ", key=f"conv_{conv_name}", on_click=lambda c=conv_name: setattr(st.session_state, "current_conversation", c)):
             pass
 
     # 新建对话
-    if st.button("新建对话", key="new_conversation"):
-        new_conversation = f"对话 {len(conversation_names) + 1}"
-        st.session_state.conversations[new_conversation] = [{"role": "system", "content": system_prompt}]
-        st.session_state.current_conversation = new_conversation
+    if st.button("新建对话", key="new_conversation", on_click=lambda: [
+        setattr(st.session_state, "current_conversation", f"对话 {len(conversation_names) + 1}"),
+        st.session_state.conversations.update({f"对话 {len(conversation_names) + 1}": [{"role": "system", "content": system_prompt}]}),
         st.rerun()
+    ]):
+        pass
 
     # 删除当前对话
     if len(conversation_names) > 1:
-        if st.button("删除当前对话", key="delete_conversation"):
-            try:
-                supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute()
-                del st.session_state.conversations[st.session_state.current_conversation]
-                st.session_state.current_conversation = get_conversation_ids()[0] if get_conversation_ids() else "对话 1"
-                st.rerun()
-            except Exception as e:
-                st.error(f"删除对话失败：{str(e)}")
+        if st.button("删除当前对话", key="delete_conversation", on_click=lambda: [
+            supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute(),
+            st.session_state.conversations.pop(st.session_state.current_conversation, None),
+            setattr(st.session_state, "current_conversation", get_conversation_ids()[0] if get_conversation_ids() else "对话 1"),
+            st.rerun()
+        ] if len(conversation_names) > 1 else None):
+            pass
 
     # 重命名当前对话
     new_name = st.text_input("重命名当前对话", value=st.session_state.current_conversation, key="rename_conversation")
     if new_name != st.session_state.current_conversation and new_name and new_name not in conversation_names:
-        try:
-            supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute()
-            for msg in st.session_state.conversations[st.session_state.current_conversation]:
-                if msg["role"] != "system":
-                    save_message(new_name, msg["role"], msg["content"])
-            st.session_state.conversations[new_name] = st.session_state.conversations.pop(st.session_state.current_conversation)
-            st.session_state.current_conversation = new_name
+        if st.button("确认重命名", key="confirm_rename", on_click=lambda: [
+            supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute(),
+            [save_message(new_name, msg["role"], msg["content"]) for msg in st.session_state.conversations[st.session_state.current_conversation] if msg["role"] != "system"],
+            st.session_state.conversations[new_name] = st.session_state.conversations.pop(st.session_state.current_conversation),
+            setattr(st.session_state, "current_conversation", new_name),
             st.rerun()
-        except Exception as e:
-            st.error(f"重命名对话失败：{str(e)}")
+        ]):
+            pass
 
 # 主界面
 st.title("DeepSeek AI 聊天")
