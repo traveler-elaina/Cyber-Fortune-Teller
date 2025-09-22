@@ -11,6 +11,7 @@ st.markdown(
         padding: 10px;
         margin: 5px;
         cursor: default;
+        user-select: text; /* 允许复制 */
     }
     .stChatMessage.user {
         background-color: #e6f3ff;
@@ -41,11 +42,8 @@ st.markdown(
         background-color: #007bff;
         color: white;
     }
-    [data-testid="stTextInput"] {
+    [data-testid="stTextInput"], [data-testid="stSelectbox"] {
         cursor: pointer;
-    }
-    .stMarkdown {
-        user-select: none;
     }
     </style>
     """,
@@ -74,8 +72,10 @@ def save_message(conv_id, role, content):
         response = supabase.table("conversations").insert(data).execute()
         if response.data:
             st.cache_data.clear()
+        return True
     except Exception as e:
         st.error(f"保存消息失败：{str(e)}")
+        return False
 
 # 加载对话历史
 @st.cache_data
@@ -95,7 +95,7 @@ def load_conversation(conv_id):
 def get_conversation_ids():
     try:
         response = supabase.table("conversations").select("conv_id").execute()
-        conv_ids = list(set(item["conv_id"] for item in response.data))  # Python 去重
+        conv_ids = list(set(item["conv_id"] for item in response.data))
         return conv_ids if conv_ids else ["对话 1"]
     except Exception as e:
         st.error(f"获取对话列表失败：{str(e)}")
@@ -198,33 +198,34 @@ with chat_container:
 # 用户输入
 if user_input := st.chat_input("请输入你的消息...", key="chat_input"):
     st.session_state.conversations[st.session_state.current_conversation].append({"role": "user", "content": user_input})
-    save_message(st.session_state.current_conversation, "user", user_input)
-    with st.chat_message("user"):
-        st.markdown(user_input)
-    
-    # 流式响应
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        message_placeholder.markdown("正在思考... ⏳")
-        full_response = ""
-        try:
-            for chunk in client.chat.completions.create(
-                model="deepseek-chat",
-                messages=st.session_state.conversations[st.session_state.current_conversation],
-                stream=True
-            ):
-                content = chunk.choices[0].delta.content or ""
-                full_response += content
-                message_placeholder.markdown(full_response + "▌")
-            message_placeholder.markdown(full_response)
-        except Exception as e:
-            if "401" in str(e):
-                message_placeholder.error("API 密钥无效，请检查 DeepSeek API 密钥。")
-            elif "network" in str(e).lower():
-                message_placeholder.error("网络错误，请检查校园网络或使用 VPN。")
-            elif "token" in str(e).lower():
-                message_placeholder.error("API token 额度不足，请检查 DeepSeek 平台。")
-            else:
-                message_placeholder.error(f"错误：{str(e)}")
-        st.session_state.conversations[st.session_state.current_conversation].append({"role": "assistant", "content": full_response})
-        save_message(st.session_state.current_conversation, "assistant", full_response)
+    if save_message(st.session_state.current_conversation, "user", user_input):
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        
+        # 流式响应
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            message_placeholder.markdown("正在思考... ⏳")
+            full_response = ""
+            try:
+                for chunk in client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=st.session_state.conversations[st.session_state.current_conversation],
+                    stream=True
+                ):
+                    content = chunk.choices[0].delta.content or ""
+                    full_response += content
+                    message_placeholder.markdown(full_response + "▌")
+                message_placeholder.markdown(full_response)
+            except Exception as e:
+                if "401" in str(e):
+                    message_placeholder.error("API 密钥无效，请检查 DeepSeek API 密钥。")
+                elif "network" in str(e).lower():
+                    message_placeholder.error("网络错误，请检查校园网络或使用 VPN。")
+                elif "token" in str(e).lower():
+                    message_placeholder.error("API token 额度不足，请检查 DeepSeek 平台。")
+                else:
+                    message_placeholder.error(f"错误：{str(e)}")
+            if full_response:
+                st.session_state.conversations[st.session_state.current_conversation].append({"role": "assistant", "content": full_response})
+                save_message(st.session_state.current_conversation, "assistant", full_response)
