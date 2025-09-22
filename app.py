@@ -1,6 +1,7 @@
 import streamlit as st
 from openai import OpenAI
-import sqlite3
+from supabase import create_client, Client
+import os
 
 # 加载 CSS 优化聊天界面和侧边栏
 st.markdown(
@@ -32,6 +33,7 @@ st.markdown(
         text-align: left;
         cursor: pointer;
         font-size: 16px;
+        transition: background-color 0.2s;
     }
     .conversation-button:hover {
         background-color: #e0e0e0;
@@ -56,6 +58,11 @@ client = OpenAI(
     api_key=st.secrets["DEEPSEEK_API_KEY"],
     base_url="https://api.deepseek.com"
 )
+
+# 初始化 Supabase 客户端
+supabase_url = st.secrets["SUPABASE_URL"]
+supabase_key = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(supabase_url, supabase_key)
 
 # 中文系统提示词（可替换为你的提示词）
 system_prompt = """
@@ -332,50 +339,41 @@ system_prompt = """
 如果理解了，先**简单回复**即可。
 """
 
-# 初始化 SQLite 数据库
-@st.cache_resource
-def init_db():
-    conn = sqlite3.connect("conversations.db")
-    c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS conversations
-                (conv_id TEXT, role TEXT, content TEXT, timestamp DATETIME)""")
-    conn.commit()
-    conn.close()
-
-# 保存消息到数据库
+# 保存消息到 Supabase
 def save_message(conv_id, role, content):
-    conn = sqlite3.connect("conversations.db")
-    c = conn.cursor()
-    c.execute("INSERT INTO conversations (conv_id, role, content, timestamp) VALUES (?, ?, ?, datetime('now'))",
-              (conv_id, role, content))
-    conn.commit()
-    conn.close()
-    st.cache_data.clear()
+    try:
+        data = {"conv_id": conv_id, "role": role, "content": content}
+        response = supabase.table("conversations").insert(data).execute()
+        if response.data:
+            st.cache_data.clear()
+    except Exception as e:
+        st.error(f"保存消息失败：{str(e)}")
 
 # 加载对话历史
 @st.cache_data
 def load_conversation(conv_id):
-    conn = sqlite3.connect("conversations.db")
-    c = conn.cursor()
-    c.execute("SELECT role, content FROM conversations WHERE conv_id = ? ORDER BY timestamp", (conv_id,))
-    messages = [{"role": "system", "content": system_prompt}]
-    for role, content in c.fetchall():
-        messages.append({"role": role, "content": content})
-    conn.close()
-    return messages
+    try:
+        response = supabase.table("conversations").select("role, content").eq("conv_id", conv_id).order("timestamp").execute()
+        messages = [{"role": "system", "content": system_prompt}]
+        for item in response.data:
+            messages.append({"role": item["role"], "content": item["content"]})
+        return messages
+    except Exception as e:
+        st.error(f"加载对话失败：{str(e)}")
+        return [{"role": "system", "content": system_prompt}]
 
 # 获取所有对话 ID
 @st.cache_data
 def get_conversation_ids():
-    conn = sqlite3.connect("conversations.db")
-    c = conn.cursor()
-    c.execute("SELECT DISTINCT conv_id FROM conversations")
-    conv_ids = [row[0] for row in c.fetchall()]
-    conn.close()
-    return conv_ids if conv_ids else ["对话 1"]
+    try:
+        response = supabase.table("conversations").select("conv_id", distinct=True).execute()
+        conv_ids = [item["conv_id"] for item in response.data]
+        return conv_ids if conv_ids else ["对话 1"]
+    except Exception as e:
+        st.error(f"获取对话列表失败：{str(e)}")
+        return ["对话 1"]
 
-# 初始化数据库和会话状态
-init_db()
+# 初始化会话状态
 if "conversations" not in st.session_state:
     st.session_state.conversations = {
         "对话 1": load_conversation("对话 1")
@@ -393,44 +391,47 @@ with st.sidebar:
     # 垂直排列的会话按钮
     for conv_name in conversation_names:
         is_active = conv_name == st.session_state.current_conversation
-        if st.button(
-            conv_name,
-            key=f"conv_{conv_name}",
-            help=f"切换到 {conv_name}",
-            on_click=lambda c=conv_name: st.session_state.update(current_conversation=c)
-        ):
-            pass  # 按钮点击通过 on_click 更新状态，避免 rerun
+        button_style = "conversation-button active" if is_active else "conversation-button"
+        st.markdown(
+            f'<button class="{button_style}" onclick="this.blur()">{conv_name}</button>',
+            unsafe_allow_html=True
+        )
+        if st.button(" ", key=f"conv_{conv_name}", on_click=lambda c=conv_name: setattr(st.session_state, "current_conversation", c)):
+            pass
 
     # 新建对话
     if st.button("新建对话", key="new_conversation"):
         new_conversation = f"对话 {len(conversation_names) + 1}"
         st.session_state.conversations[new_conversation] = [{"role": "system", "content": system_prompt}]
         st.session_state.current_conversation = new_conversation
-        st.experimental_rerun()
+        st.rerun()
 
     # 删除当前对话
     if len(conversation_names) > 1:
         if st.button("删除当前对话", key="delete_conversation"):
-            conn = sqlite3.connect("conversations.db")
-            c = conn.cursor()
-            c.execute("DELETE FROM conversations WHERE conv_id = ?", (st.session_state.current_conversation,))
-            conn.commit()
-            conn.close()
-            del st.session_state.conversations[st.session_state.current_conversation]
-            st.session_state.current_conversation = get_conversation_ids()[0]
-            st.experimental_rerun()
+            try:
+                supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute()
+                del st.session_state.conversations[st.session_state.current_conversation]
+                st.session_state.current_conversation = get_conversation_ids()[0] if get_conversation_ids() else "对话 1"
+                st.rerun()
+            except Exception as e:
+                st.error(f"删除对话失败：{str(e)}")
 
     # 重命名当前对话
     new_name = st.text_input("重命名当前对话", value=st.session_state.current_conversation, key="rename_conversation")
     if new_name != st.session_state.current_conversation and new_name and new_name not in conversation_names:
-        conn = sqlite3.connect("conversations.db")
-        c = conn.cursor()
-        c.execute("UPDATE conversations SET conv_id = ? WHERE conv_id = ?", (new_name, st.session_state.current_conversation))
-        conn.commit()
-        conn.close()
-        st.session_state.conversations[new_name] = st.session_state.conversations.pop(st.session_state.current_conversation)
-        st.session_state.current_conversation = new_name
-        st.experimental_rerun()
+        try:
+            # 先删除旧 ID 的记录，再插入新 ID 的记录（模拟更新主键）
+            supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute()
+            # 重新插入所有消息（从内存中）
+            for msg in st.session_state.conversations[st.session_state.current_conversation]:
+                if msg["role"] != "system":  # 系统提示不存入
+                    save_message(new_name, msg["role"], msg["content"])
+            st.session_state.conversations[new_name] = st.session_state.conversations.pop(st.session_state.current_conversation)
+            st.session_state.current_conversation = new_name
+            st.rerun()
+        except Exception as e:
+            st.error(f"重命名对话失败：{str(e)}")
 
 # 主界面
 st.title("DeepSeek AI 聊天")
@@ -444,17 +445,22 @@ with st.container():
     with col_import:
         uploaded_file = st.file_uploader("导入对话历史", type=["txt"])
         if uploaded_file:
-            content = uploaded_file.read().decode("utf-8")
-            messages = [{"role": "system", "content": system_prompt}]
-            for line in content.split("\n"):
-                if line.startswith("user:"):
-                    messages.append({"role": "user", "content": line[5:].strip()})
-                    save_message(st.session_state.current_conversation, "user", line[5:].strip())
-                elif line.startswith("assistant:"):
-                    messages.append({"role": "assistant", "content": line[10:].strip()})
-                    save_message(st.session_state.current_conversation, "assistant", line[10:].strip())
-            st.session_state.conversations[st.session_state.current_conversation] = messages
-            st.experimental_rerun()
+            try:
+                content = uploaded_file.read().decode("utf-8")
+                messages = [{"role": "system", "content": system_prompt}]
+                for line in content.split("\n"):
+                    if line.startswith("user:"):
+                        user_content = line[5:].strip()
+                        messages.append({"role": "user", "content": user_content})
+                        save_message(st.session_state.current_conversation, "user", user_content)
+                    elif line.startswith("assistant:"):
+                        assistant_content = line[10:].strip()
+                        messages.append({"role": "assistant", "content": assistant_content})
+                        save_message(st.session_state.current_conversation, "assistant", assistant_content)
+                st.session_state.conversations[st.session_state.current_conversation] = messages
+                st.rerun()
+            except Exception as e:
+                st.error(f"导入对话失败：{str(e)}")
 
 # 显示当前对话的聊天历史
 chat_container = st.container()
