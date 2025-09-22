@@ -1,7 +1,6 @@
 import streamlit as st
 from openai import OpenAI
 from supabase import create_client, Client
-import os
 
 # 加载 CSS 优化聊天界面和侧边栏
 st.markdown(
@@ -64,10 +63,11 @@ supabase_url = st.secrets["SUPABASE_URL"]
 supabase_key = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(supabase_url, supabase_key)
 
-# 中文系统提示词（可替换为你的提示词）
+# 从 Secrets 读取提示词
 system_prompt = st.secrets["SYSTEM_PROMPT"]
 
 # 保存消息到 Supabase
+@st.cache_data
 def save_message(conv_id, role, content):
     try:
         data = {"conv_id": conv_id, "role": role, "content": content}
@@ -94,8 +94,8 @@ def load_conversation(conv_id):
 @st.cache_data
 def get_conversation_ids():
     try:
-        response = supabase.table("conversations").select("conv_id", distinct=True).execute()
-        conv_ids = [item["conv_id"] for item in response.data]
+        response = supabase.table("conversations").select("conv_id").execute()
+        conv_ids = list(set(item["conv_id"] for item in response.data))  # Python 去重
         return conv_ids if conv_ids else ["对话 1"]
     except Exception as e:
         st.error(f"获取对话列表失败：{str(e)}")
@@ -149,11 +149,9 @@ with st.sidebar:
     new_name = st.text_input("重命名当前对话", value=st.session_state.current_conversation, key="rename_conversation")
     if new_name != st.session_state.current_conversation and new_name and new_name not in conversation_names:
         try:
-            # 先删除旧 ID 的记录，再插入新 ID 的记录（模拟更新主键）
             supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute()
-            # 重新插入所有消息（从内存中）
             for msg in st.session_state.conversations[st.session_state.current_conversation]:
-                if msg["role"] != "system":  # 系统提示不存入
+                if msg["role"] != "system":
                     save_message(new_name, msg["role"], msg["content"])
             st.session_state.conversations[new_name] = st.session_state.conversations.pop(st.session_state.current_conversation)
             st.session_state.current_conversation = new_name
@@ -230,4 +228,3 @@ if user_input := st.chat_input("请输入你的消息...", key="chat_input"):
                 message_placeholder.error(f"错误：{str(e)}")
         st.session_state.conversations[st.session_state.current_conversation].append({"role": "assistant", "content": full_response})
         save_message(st.session_state.current_conversation, "assistant", full_response)
-
