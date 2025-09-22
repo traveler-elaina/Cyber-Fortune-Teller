@@ -166,16 +166,21 @@ with st.sidebar:
             pass
 
     # 重命名当前对话
+    def rename_conversation(new_name):
+        try:
+            supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute()
+            for msg in st.session_state.conversations[st.session_state.current_conversation]:
+                if msg["role"] != "system":
+                    save_message(new_name, msg["role"], msg["content"])
+            st.session_state.conversations[new_name] = st.session_state.conversations.pop(st.session_state.current_conversation)
+            st.session_state.current_conversation = new_name
+            st.rerun()
+        except Exception as e:
+            st.error(f"重命名对话失败：{str(e)}")
+
     new_name = st.text_input("重命名当前对话", value=st.session_state.current_conversation, key="rename_conversation")
     if new_name != st.session_state.current_conversation and new_name and new_name not in conversation_names:
-        if st.button("确认重命名", key="confirm_rename", on_click=lambda: [
-            supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute(),
-            [save_message(new_name, msg["role"], msg["content"]) for msg in st.session_state.conversations[st.session_state.current_conversation] if msg["role"] != "system"],
-            st.session_state.conversations[new_name] = st.session_state.conversations.pop(st.session_state.current_conversation),
-            setattr(st.session_state, "current_conversation", new_name),
-            st.rerun()
-        ]):
-            pass
+        st.button("确认重命名", key="confirm_rename", on_click=lambda: rename_conversation(new_name))
 
 # 主界面
 st.title("DeepSeek AI 聊天")
