@@ -122,11 +122,10 @@ def get_preview(conv_id):
 
 # 初始化会话状态
 if "conversations" not in st.session_state:
-    st.session_state.conversations = {
-        "对话 1": load_conversation("对话 1")
-    }
-if "current_conversation" not in st.session_state:
+    st.session_state.conversations = {}
+if "current_conversation" not in st.session_state or st.session_state.current_conversation not in st.session_state.conversations:
     st.session_state.current_conversation = "对话 1"
+    st.session_state.conversations["对话 1"] = load_conversation("对话 1")
 
 # 侧边栏：对话管理
 with st.sidebar:
@@ -135,6 +134,10 @@ with st.sidebar:
     if not conversation_names:
         conversation_names = ["对话 1"]
     
+    # 同步当前对话
+    if st.session_state.current_conversation not in conversation_names:
+        st.session_state.current_conversation = conversation_names[0]
+
     # 垂直排列的会话按钮
     for conv_name in conversation_names:
         is_active = conv_name == st.session_state.current_conversation
@@ -189,8 +192,12 @@ st.title("DeepSeek AI 聊天")
 with st.container():
     col_export, col_import = st.columns(2)
     with col_export:
-        chat_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.conversations[st.session_state.current_conversation][1:]])
-        st.download_button("导出当前对话", chat_history, file_name=f"{st.session_state.current_conversation}.txt")
+        current_conv = st.session_state.current_conversation
+        if current_conv in st.session_state.conversations and st.session_state.conversations[current_conv]:
+            chat_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.conversations[current_conv][1:]])
+            st.download_button("导出当前对话", chat_history, file_name=f"{current_conv}.txt")
+        else:
+            st.warning("当前对话为空或不存在，无法导出！")
     with col_import:
         uploaded_file = st.file_uploader("导入对话历史", type=["txt"])
         if uploaded_file:
