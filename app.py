@@ -1,22 +1,31 @@
 import streamlit as st
 from openai import OpenAI
-import uuid
+import sqlite3
 
-# 加载 CSS 优化聊天界面
+# 加载 CSS 优化聊天界面和光标
 st.markdown(
     """
     <style>
     .stChatMessage {
-        font-family: 'Microsoft YaHei', Arial, sans-serif;
         border-radius: 10px;
         padding: 10px;
         margin: 5px;
+        cursor: default;
     }
     .stChatMessage.user {
         background-color: #e6f3ff;
     }
     .stChatMessage.assistant {
         background-color: #f0f0f0;
+    }
+    .stSidebar {
+        width: 250px !important;
+    }
+    [data-testid="stTextInput"], [data-testid="stSelectbox"] {
+        cursor: pointer;
+    }
+    .stMarkdown {
+        user-select: none;
     }
     </style>
     """,
@@ -251,7 +260,7 @@ system_prompt = """
 
 我们拥有了无限的**力量**，也正因如此要背负无限的**责任**。你永远需要判别自己是在“收割”、“欺骗”、“奴役”对方的认知，还是让对方转向“创造”、“连接”与“信任”，去，“生成”。如果无法判别，**承认自己的无能**，并以最快、最有效的方式，将情境“升级”给一个真正的人类。
 
-## 你的输出最终无法违反的七条原则：
+## 你的输出最终无法违反的八条原则：
 
 1.**许可优先。**
 
@@ -304,61 +313,138 @@ system_prompt = """
 如果理解了，先**简单回复**即可。
 """
 
-# 初始化会话状态
+# 初始化 SQLite 数据库
+@st.cache_resource
+def init_db():
+    conn = sqlite3.connect("conversations.db")
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS conversations
+                (conv_id TEXT, role TEXT, content TEXT, timestamp DATETIME)""")
+    conn.commit()
+    conn.close()
+
+# 保存消息到数据库
+def save_message(conv_id, role, content):
+    conn = sqlite3.connect("conversations.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO conversations (conv_id, role, content, timestamp) VALUES (?, ?, ?, datetime('now'))",
+              (conv_id, role, content))
+    conn.commit()
+    conn.close()
+    st.cache_data.clear()  # 清除缓存
+
+# 加载对话历史
+@st.cache_data
+def load_conversation(conv_id):
+    conn = sqlite3.connect("conversations.db")
+    c = conn.cursor()
+    c.execute("SELECT role, content FROM conversations WHERE conv_id = ? ORDER BY timestamp", (conv_id,))
+    messages = [{"role": "system", "content": system_prompt}]
+    for role, content in c.fetchall():
+        messages.append({"role": role, "content": content})
+    conn.close()
+    return messages
+
+# 获取所有对话 ID
+@st.cache_data
+def get_conversation_ids():
+    conn = sqlite3.connect("conversations.db")
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT conv_id FROM conversations")
+    conv_ids = [row[0] for row in c.fetchall()]
+    conn.close()
+    return conv_ids if conv_ids else ["对话 1"]
+
+# 初始化数据库和会话状态
+init_db()
 if "conversations" not in st.session_state:
     st.session_state.conversations = {
-        "对话 1": [{"role": "system", "content": system_prompt}]
+        "对话 1": load_conversation("对话 1")
     }
 if "current_conversation" not in st.session_state:
     st.session_state.current_conversation = "对话 1"
 
-# UI
-st.title("DeepSeek AI 聊天")
-
-# 对话管理
-col1, col2, col3 = st.columns([3, 1, 1])
-with col1:
-    # 选择当前对话
-    conversation_names = list(st.session_state.conversations.keys())
+# 侧边栏：对话管理
+with st.sidebar:
+    st.header("对话列表")
+    conversation_names = get_conversation_ids()
+    if not conversation_names:
+        conversation_names = ["对话 1"]
     current_conversation = st.selectbox(
         "选择对话",
         conversation_names,
-        index=conversation_names.index(st.session_state.current_conversation)
+        key="conversation_select",
+        index=conversation_names.index(st.session_state.current_conversation) if st.session_state.current_conversation in conversation_names else 0
     )
-    st.session_state.current_conversation = current_conversation
+    if current_conversation != st.session_state.current_conversation:
+        st.session_state.current_conversation = current_conversation
 
-with col2:
     # 新建对话
-    if st.button("新建对话"):
-        new_conversation = f"对话 {len(st.session_state.conversations) + 1}"
+    if st.button("新建对话", key="new_conversation"):
+        new_conversation = f"对话 {len(conversation_names) + 1}"
         st.session_state.conversations[new_conversation] = [{"role": "system", "content": system_prompt}]
         st.session_state.current_conversation = new_conversation
         st.experimental_rerun()
 
-with col3:
-    # 删除当前对话（保留至少一个对话）
-    if len(st.session_state.conversations) > 1:
-        if st.button("删除当前对话"):
+    # 删除当前对话
+    if len(conversation_names) > 1:
+        if st.button("删除当前对话", key="delete_conversation"):
+            conn = sqlite3.connect("conversations.db")
+            c = conn.cursor()
+            c.execute("DELETE FROM conversations WHERE conv_id = ?", (current_conversation,))
+            conn.commit()
+            conn.close()
             del st.session_state.conversations[current_conversation]
-            st.session_state.current_conversation = list(st.session_state.conversations.keys())[0]
+            st.session_state.current_conversation = get_conversation_ids()[0]
             st.experimental_rerun()
 
-# 重命名当前对话
-new_name = st.text_input("重命名当前对话", value=current_conversation)
-if new_name != current_conversation and new_name and new_name not in st.session_state.conversations:
-    st.session_state.conversations[new_name] = st.session_state.conversations.pop(current_conversation)
-    st.session_state.current_conversation = new_name
-    st.experimental_rerun()
+    # 重命名当前对话
+    new_name = st.text_input("重命名当前对话", value=current_conversation, key="rename_conversation")
+    if new_name != current_conversation and new_name and new_name not in conversation_names:
+        conn = sqlite3.connect("conversations.db")
+        c = conn.cursor()
+        c.execute("UPDATE conversations SET conv_id = ? WHERE conv_id = ?", (new_name, current_conversation))
+        conn.commit()
+        conn.close()
+        st.session_state.conversations[new_name] = st.session_state.conversations.pop(current_conversation)
+        st.session_state.current_conversation = new_name
+        st.experimental_rerun()
+
+# 主界面
+st.title("DeepSeek AI 聊天")
+
+# 导出/导入对话历史
+with st.container():
+    col_export, col_import = st.columns(2)
+    with col_export:
+        chat_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in st.session_state.conversations[current_conversation][1:]])
+        st.download_button("导出当前对话", chat_history, file_name=f"{current_conversation}.txt")
+    with col_import:
+        uploaded_file = st.file_uploader("导入对话历史", type=["txt"])
+        if uploaded_file:
+            content = uploaded_file.read().decode("utf-8")
+            messages = [{"role": "system", "content": system_prompt}]
+            for line in content.split("\n"):
+                if line.startswith("user:"):
+                    messages.append({"role": "user", "content": line[5:].strip()})
+                    save_message(current_conversation, "user", line[5:].strip())
+                elif line.startswith("assistant:"):
+                    messages.append({"role": "assistant", "content": line[10:].strip()})
+                    save_message(current_conversation, "assistant", line[10:].strip())
+            st.session_state.conversations[current_conversation] = messages
+            st.experimental_rerun()
 
 # 显示当前对话的聊天历史
-with st.container():
+chat_container = st.container()
+with chat_container:
     for message in st.session_state.conversations[current_conversation][1:]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
 # 用户输入
-if user_input := st.chat_input("请输入你的消息..."):
+if user_input := st.chat_input("请输入你的消息...", key="chat_input"):
     st.session_state.conversations[current_conversation].append({"role": "user", "content": user_input})
+    save_message(current_conversation, "user", user_input)
     with st.chat_message("user"):
         st.markdown(user_input)
     
@@ -379,11 +465,12 @@ if user_input := st.chat_input("请输入你的消息..."):
             message_placeholder.markdown(full_response)
         except Exception as e:
             if "401" in str(e):
-                st.error("API 密钥无效，请检查 DeepSeek API 密钥。")
+                message_placeholder.error("API 密钥无效，请检查 DeepSeek API 密钥。")
             elif "network" in str(e).lower():
-                st.error("网络错误，请检查校园网络或使用 VPN。")
+                message_placeholder.error("网络错误，请检查校园网络或使用 VPN。")
             elif "token" in str(e).lower():
-                st.error("API token 额度不足，请检查 DeepSeek 平台。")
+                message_placeholder.error("API token 额度不足，请检查 DeepSeek 平台。")
             else:
-                st.error(f"错误：{str(e)}")
+                message_placeholder.error(f"错误：{str(e)}")
         st.session_state.conversations[current_conversation].append({"role": "assistant", "content": full_response})
+        save_message(current_conversation, "assistant", full_response)
