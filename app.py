@@ -149,17 +149,11 @@ with st.sidebar:
         button_style = "conversation-button active" if is_active else "conversation-button"
         preview = get_preview(conv_name)
         st.markdown(
-            f'<button class="{button_style}" onclick="Streamlit.setComponentValue({{"conv": "{conv_name}"}})">{conv_name}<br><span>{preview}</span></button>',
+            f'<button class="{button_style}" onclick="this.blur()">{conv_name}<br><span>{preview}</span></button>',
             unsafe_allow_html=True
         )
-
-    # 处理组件值变化
-    if st.session_state.get("component_value"):
-        if "conv" in st.session_state.component_value:
-            new_conv = st.session_state.component_value["conv"]
-            if new_conv in conversation_names:  # 确保有效对话
-                setattr(st.session_state, "current_conversation", new_conv)
-            del st.session_state["component_value"]  # 清理临时状态
+        if st.button(" ", key=f"conv_{conv_name}", on_click=lambda c=conv_name: setattr(st.session_state, "current_conversation", c)):
+            pass
 
     # 新建对话
     if st.button("新建对话", key="new_conversation", on_click=lambda: [
