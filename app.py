@@ -74,7 +74,8 @@ def save_message(conv_id, role, content):
         data = {"conv_id": conv_id, "role": role, "content": content}
         response = supabase.table("conversations").insert(data).execute()
         if response.data:
-            st.cache_data.clear()
+            load_conversation.clear(conv_id=conv_id)
+            get_preview.clear(conv_id=conv_id)
         return True
     except Exception as e:
         st.error(f"保存消息失败：{str(e)}")
@@ -82,7 +83,7 @@ def save_message(conv_id, role, content):
 
 # 加载对话历史
 @st.cache_data
-def load_conversation(conv_id):
+def load_conversation(conv_id, _cache_key=None):
     try:
         response = supabase.table("conversations").select("role, content").eq("conv_id", conv_id).order("timestamp").execute()
         messages = [{"role": "system", "content": system_prompt}]
@@ -126,12 +127,12 @@ with st.sidebar:
     conversation_names = get_conversation_ids()
     if not conversation_names:
         conversation_names = ["对话 1"]
-    
+
     # 动态加载对话
     for conv_name in conversation_names:
         if conv_name not in st.session_state.conversations:
             st.session_state.conversations[conv_name] = load_conversation(conv_name)
-    
+
     # 同步当前对话
     if st.session_state.current_conversation not in conversation_names:
         st.session_state.current_conversation = conversation_names[0]
@@ -140,39 +141,59 @@ with st.sidebar:
     for conv_name in conversation_names:
         is_active = conv_name == st.session_state.current_conversation
         preview = get_preview(conv_name)
-        if st.button(f"{conv_name}\n<span style='font-size: 12px; color: #666;'>{preview}</span>", key=f"conv_{conv_name}", on_click=lambda c=conv_name: setattr(st.session_state, "current_conversation", c), help=f"切换到 {conv_name}"):
+        if st.button(
+            f"{conv_name}\n<span style='font-size: 12px; color: #666;'>{preview}</span>",
+            key=f"conv_{conv_name}",
+            on_click=lambda c=conv_name: setattr(st.session_state, "current_conversation", c),
+            help=f"切换到 {conv_name}"
+        ):
             st.session_state.current_conversation = conv_name
 
     # 新建对话
-    if st.button("新建对话", key="new_conversation", on_click=lambda: [
-        new_id = f"对话 {max([int(c.split(' ')[1]) for c in conversation_names if c.startswith('对话')] + [0]) + 1}",
-        setattr(st.session_state, "current_conversation", new_id),
-        st.session_state.conversations.update({new_id: [{"role": "system", "content": system_prompt}]}),
-        save_message(new_id, "system", system_prompt),
+    def create_new_conversation():
+        conversation_names = get_conversation_ids()
+        new_id = "对话 1"
+        try:
+            conv_numbers = [
+                int(c.split(' ')[1])
+                for c in conversation_names
+                if c.startswith('对话') and len(c.split(' ')) > 1 and c.split(' ')[1].isdigit()
+            ]
+            new_id = f"对话 {max(conv_numbers + [0]) + 1}"
+        except Exception:
+            pass
+        st.session_state.current_conversation = new_id
+        st.session_state.conversations[new_id] = [{"role": "system", "content": system_prompt}]
+        save_message(new_id, "system", system_prompt)
         st.rerun()
-    ]):
+
+    if st.button("新建对话", key="new_conversation", on_click=create_new_conversation):
         pass
 
     # 删除当前对话
+    def delete_conversation():
+        try:
+            current_conv = st.session_state.current_conversation
+            supabase.table("conversations").delete().eq("conv_id", current_conv).execute()
+            st.session_state.conversations.pop(current_conv, None)
+            new_convs = get_conversation_ids()
+            new_conv = new_convs[0] if new_convs else "对话 1"
+            if new_conv not in st.session_state.conversations:
+                st.session_state.conversations[new_conv] = [{"role": "system", "content": system_prompt}]
+                save_message(new_conv, "system", system_prompt)
+            st.session_state.current_conversation = new_conv
+            st.rerun()
+        except Exception as e:
+            st.error(f"删除对话失败：{e}")
+
     if len(conversation_names) > 1:
-        if st.button("删除当前对话", key="delete_conversation", on_click=lambda: [
-            try:
-                supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute()
-                st.session_state.conversations.pop(st.session_state.current_conversation, None)
-                setattr(st.session_state, "current_conversation", get_conversation_ids()[0] if get_conversation_ids() else "对话 1")
-                st.rerun()
-            except Exception as e:
-                st.error(f"删除对话失败：{e}")
-        ]):
+        if st.button("删除当前对话", key="delete_conversation", on_click=delete_conversation):
             pass
 
     # 重命名当前对话
     def rename_conversation(new_name):
         try:
-            supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute()
-            for msg in st.session_state.conversations[st.session_state.current_conversation]:
-                if msg["role"] != "system":
-                    save_message(new_name, msg["role"], msg["content"])
+            supabase.table("conversations").update({"conv_id": new_name}).eq("conv_id", st.session_state.current_conversation).execute()
             st.session_state.conversations[new_name] = st.session_state.conversations.pop(st.session_state.current_conversation)
             st.session_state.current_conversation = new_name
             st.rerun()
@@ -203,14 +224,21 @@ with st.container():
                 content = uploaded_file.read().decode("utf-8")
                 messages = [{"role": "system", "content": system_prompt}]
                 for line in content.split("\n"):
-                    if line.startswith("user:"):
-                        user_content = line[5:].strip()
-                        messages.append({"role": "user", "content": user_content})
-                        save_message(st.session_state.current_conversation, "user", user_content)
-                    elif line.startswith("assistant:"):
-                        assistant_content = line[10:].strip()
-                        messages.append({"role": "assistant", "content": assistant_content})
-                        save_message(st.session_state.current_conversation, "assistant", assistant_content)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if not (line.startswith("user:") or line.startswith("assistant:")):
+                        st.error(f"无效的行格式：{line}")
+                        continue
+                    role, content = line.split(":", 1)
+                    role = role.strip()
+                    content = content.strip()
+                    if role == "user":
+                        messages.append({"role": "user", "content": content})
+                        save_message(st.session_state.current_conversation, "user", content)
+                    elif role == "assistant":
+                        messages.append({"role": "assistant", "content": content})
+                        save_message(st.session_state.current_conversation, "assistant", content)
                 st.session_state.conversations[st.session_state.current_conversation] = messages
                 st.rerun()
             except Exception as e:
@@ -229,7 +257,7 @@ if user_input := st.chat_input("请输入你的消息...", key="chat_input"):
     if save_message(st.session_state.current_conversation, "user", user_input):
         with st.chat_message("user"):
             st.markdown(user_input)
-        
+
         # 流式响应
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
@@ -246,14 +274,17 @@ if user_input := st.chat_input("请输入你的消息...", key="chat_input"):
                     message_placeholder.markdown(full_response + "▌")
                 message_placeholder.markdown(full_response)
             except Exception as e:
-                if "401" in str(e):
+                error_message = str(e).lower()
+                if "401" in error_message:
                     message_placeholder.error("API 密钥无效，请检查 DeepSeek API 密钥。")
-                elif "network" in str(e).lower():
-                    message_placeholder.error("网络错误，请检查校园网络或使用 VPN。")
-                elif "token" in str(e).lower():
+                elif "network" in error_message:
+                    message_placeholder.error("网络错误，请检查网络连接或使用 VPN。")
+                elif "token" in error_message:
                     message_placeholder.error("API token 额度不足，请检查 DeepSeek 平台。")
+                elif "rate_limit" in error_message:
+                    message_placeholder.error("API 请求超限，请稍后重试。")
                 else:
-                    message_placeholder.error(f"错误：{str(e)}")
+                    message_placeholder.error(f"未知错误：{str(e)}")
             if full_response:
                 st.session_state.conversations[st.session_state.current_conversation].append({"role": "assistant", "content": full_response})
                 save_message(st.session_state.current_conversation, "assistant", full_response)
