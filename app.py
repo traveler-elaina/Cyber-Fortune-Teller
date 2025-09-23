@@ -23,8 +23,7 @@ st.markdown(
         width: 250px !important;
         background-color: #f8f9fa;
     }
-    .conversation-button {
-        display: block;
+    .stButton>button {
         width: 100%;
         padding: 10px;
         margin: 2px 0;
@@ -35,22 +34,16 @@ st.markdown(
         cursor: pointer;
         font-size: 14px;
         transition: all 0.2s;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        white-space: pre-wrap;
     }
-    .conversation-button:hover {
+    .stButton>button:hover {
         background-color: #f0f0f0;
         border-color: #ccc;
     }
-    .conversation-button.active {
+    .stButton[data-baseweb="button"] button[title*="对话"] {
         background-color: #007bff;
         color: white;
         border-color: #0056b3;
-    }
-    .conversation-button span {
-        display: block;
-        font-size: 12px;
-        color: #666;
     }
     [data-testid="stTextInput"], [data-testid="stSelectbox"] {
         cursor: pointer;
@@ -146,19 +139,16 @@ with st.sidebar:
     # 垂直排列的会话按钮
     for conv_name in conversation_names:
         is_active = conv_name == st.session_state.current_conversation
-        button_style = "conversation-button active" if is_active else "conversation-button"
         preview = get_preview(conv_name)
-        st.markdown(
-            f'<button class="{button_style}" onclick="this.blur()">{conv_name}<br><span>{preview}</span></button>',
-            unsafe_allow_html=True
-        )
-        if st.button(" ", key=f"conv_{conv_name}", on_click=lambda c=conv_name: setattr(st.session_state, "current_conversation", c)):
-            pass
+        if st.button(f"{conv_name}\n<span style='font-size: 12px; color: #666;'>{preview}</span>", key=f"conv_{conv_name}", on_click=lambda c=conv_name: setattr(st.session_state, "current_conversation", c), help=f"切换到 {conv_name}"):
+            st.session_state.current_conversation = conv_name
 
     # 新建对话
     if st.button("新建对话", key="new_conversation", on_click=lambda: [
-        setattr(st.session_state, "current_conversation", f"对话 {len(conversation_names) + 1}"),
-        st.session_state.conversations.update({f"对话 {len(conversation_names) + 1}": [{"role": "system", "content": system_prompt}]}),
+        new_id = f"对话 {max([int(c.split(' ')[1]) for c in conversation_names if c.startswith('对话')] + [0]) + 1}",
+        setattr(st.session_state, "current_conversation", new_id),
+        st.session_state.conversations.update({new_id: [{"role": "system", "content": system_prompt}]}),
+        save_message(new_id, "system", system_prompt),
         st.rerun()
     ]):
         pass
@@ -166,11 +156,14 @@ with st.sidebar:
     # 删除当前对话
     if len(conversation_names) > 1:
         if st.button("删除当前对话", key="delete_conversation", on_click=lambda: [
-            supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute(),
-            st.session_state.conversations.pop(st.session_state.current_conversation, None),
-            setattr(st.session_state, "current_conversation", get_conversation_ids()[0] if get_conversation_ids() else "对话 1"),
-            st.rerun()
-        ] if len(conversation_names) > 1 else None):
+            try:
+                supabase.table("conversations").delete().eq("conv_id", st.session_state.current_conversation).execute()
+                st.session_state.conversations.pop(st.session_state.current_conversation, None)
+                setattr(st.session_state, "current_conversation", get_conversation_ids()[0] if get_conversation_ids() else "对话 1")
+                st.rerun()
+            except Exception as e:
+                st.error(f"删除对话失败：{e}")
+        ]):
             pass
 
     # 重命名当前对话
