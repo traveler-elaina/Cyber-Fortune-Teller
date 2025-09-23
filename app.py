@@ -48,6 +48,23 @@ st.markdown(
     [data-testid="stTextInput"], [data-testid="stSelectbox"] {
         cursor: pointer;
     }
+    .conversation-item {
+        padding: 5px;
+        margin: 2px 0;
+        border-radius: 8px;
+        background-color: #ffffff;
+        border: 1px solid #ddd;
+        cursor: pointer;
+    }
+    .conversation-item:hover {
+        background-color: #f0f0f0;
+        border-color: #ccc;
+    }
+    .conversation-preview {
+        font-size: 12px;
+        color: #666;
+        margin-top: 2px;
+    }
     </style>
     """,
     unsafe_allow_html=True
@@ -110,7 +127,7 @@ def get_conversation_ids():
 def get_preview(conv_id):
     try:
         response = supabase.table("conversations").select("content").eq("conv_id", conv_id).order("timestamp", desc=True).limit(1).execute()
-        return response.data[0]["content"][:20] + "..." if response.data else "无消息"
+        return response.data[0]["content"][:50] + "..." if response.data else "无消息"
     except Exception:
         return "无消息"
 
@@ -137,17 +154,25 @@ with st.sidebar:
     if st.session_state.current_conversation not in conversation_names:
         st.session_state.current_conversation = conversation_names[0]
 
-    # 垂直排列的会话按钮
+    # 垂直排列的会话项
     for conv_name in conversation_names:
         is_active = conv_name == st.session_state.current_conversation
         preview = get_preview(conv_name)
-        if st.button(
-            f"{conv_name}\n<span style='font-size: 12px; color: #666;'>{preview}</span>",
-            key=f"conv_{conv_name}",
-            on_click=lambda c=conv_name: setattr(st.session_state, "current_conversation", c),
-            help=f"切换到 {conv_name}"
-        ):
-            st.session_state.current_conversation = conv_name
+        with st.container():
+            # 使用 button 显示对话名称，保持点击功能
+            if st.button(
+                conv_name,
+                key=f"conv_{conv_name}",
+                on_click=lambda c=conv_name: setattr(st.session_state, "current_conversation", c),
+                help=f"切换到 {conv_name}",
+                disabled=is_active  # 禁用当前选中的对话按钮
+            ):
+                st.session_state.current_conversation = conv_name
+            # 使用 markdown 显示预览文本，支持样式
+            st.markdown(
+                f"<div class='conversation-preview'>{preview}</div>",
+                unsafe_allow_html=True
+            )
 
     # 新建对话
     def create_new_conversation():
